@@ -1,0 +1,13 @@
+# зависимости
+node_modules/
+
+# логове / временни
+*.log
+*.tmp
+scratchpad/
+
+# OS / редактори
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
