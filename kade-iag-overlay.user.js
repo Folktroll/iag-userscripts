@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura овърлеи (слоеве)
 // @namespace    https://maps.iag.bg/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Добавя прозрачни овърлеи към kade.si (ловни райони и горска карта от ИАГ, кадастрални граници от КАИС, защитени територии/Natura), с тикчета в менюто със слоеве като Hiking и Open Railway Map.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -95,21 +95,26 @@
     };
 
     // Овърлеи за добавяне. `source(ol)` връща OpenLayers източника; `opacity` – прозрачност.
+    // `shortTitle` – уникален код; нужен е, за да ги разпознава permalink логиката на
+    // kade.si (иначе при зуум слой без shortTitle се включва принудително пак).
     // Редът тук = ред в менюто (отгоре надолу); последният ред излиза най-долу.
     const OVERLAYS = [
-        { title: 'ИАГ – Ловни райони', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:lr_hunting_08_2024') },
+        { title: 'ИАГ – Ловни райони', shortTitle: 'iaglov', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:lr_hunting_08_2024') },
         {
             title: 'ИАГ – Горска карта',
+            shortTitle: 'iaggora',
             opacity: 0.45,
             source: (ol) => iagSource(ol, 'IAG:dleso_full_2022', softOutlineSLD('IAG:dleso_full_2022')),
         },
         {
             title: 'Кадастър (граници)',
+            shortTitle: 'kais',
             opacity: 0.8,
             source: (ol) => arcgisSource(ol, { url: KAIS, attr: KAIS_ATTR, params: { format: 'png', transparent: true } }),
         },
         {
             title: 'Защитени територии (Natura/ЗЗТ)',
+            shortTitle: 'natura',
             opacity: 0.6,
             source: (ol) =>
                 arcgisSource(ol, {
@@ -125,9 +130,10 @@
     // затова HTML-ът минава и преживява прерисуване на менюто.
     const NEW_BADGE = ' <span class="iag-new">NEW</span>';
 
-    const makeLayer = (ol, { title, opacity, source }) =>
+    const makeLayer = (ol, { title, shortTitle, opacity, source }) =>
         new ol.layer.Tile({
             title: title + NEW_BADGE, // ol-layerswitcher показва слоя по това заглавие
+            shortTitle, // код за permalink логиката на kade.si (виж бележката при OVERLAYS)
             // без type:'base' => слоят е овърлей (тикче, не радио-бутон)
             visible: false, // стартира изключен, включва се с тикчето
             zIndex: 3, // над базовата карта и над ORM/Hiking (zIndex 1)
