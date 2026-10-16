@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.0.0
+// @version      2.1.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии/Natura) с тикчета в менюто, и popup при клик с инфо за точката. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -307,8 +307,8 @@
         const css = `
 .iag-new{display:inline-block;background:#e8521f;color:#fff;font:700 9px/1.4 system-ui,Arial,sans-serif;
   vertical-align:middle;padding:0 4px;margin-left:4px;border-radius:3px;letter-spacing:.5px}
-.iag-info-row{border-top:1px solid #ddd;margin-top:4px;padding-top:6px}
 .iag-info-row label{cursor:pointer}
+.iag-sep{list-style:none;border-top:2px solid #ccc;margin:6px 0 4px;padding:0;height:0}
 .iag-popup{position:absolute;min-width:200px;max-width:320px;background:#fff;color:#1a1a1a;
   border:1px solid #bbb;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);
   padding:10px 12px 10px;font:13px/1.4 system-ui,Arial,sans-serif;bottom:12px;left:-50%}
@@ -394,10 +394,25 @@
             }
         });
 
+        // --- разделител над първия наш овърлей (за да личи къде почват опциите ни) ---
+        const insertSeparator = (ul) => {
+            if (ul.querySelector('.iag-sep')) return;
+            // първият ред със значка „NEW“, който НЕ е тикчето – това е първият наш овърлей
+            const firstOurs = [...ul.querySelectorAll('li')].find(
+                (li) => li.querySelector('.iag-new') && !li.classList.contains('iag-info-row'),
+            );
+            if (!firstOurs) return;
+            const sep = document.createElement('li');
+            sep.className = 'iag-sep';
+            ul.insertBefore(sep, firstOurs);
+        };
+
         // --- тикче „Инфо при клик“ най-долу в менюто ---
         const appendInfoToggle = (panel) => {
             const ul = panel && panel.querySelector('ul');
-            if (!ul || ul.querySelector('#iag-info-toggle')) return;
+            if (!ul) return;
+            insertSeparator(ul);
+            if (ul.querySelector('#iag-info-toggle')) return;
             const li = document.createElement('li');
             li.className = 'iag-info-row';
             const input = document.createElement('input');
