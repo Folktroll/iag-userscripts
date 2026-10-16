@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ овърлеи (слоеве)
 // @namespace    https://maps.iag.bg/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Добавя прозрачни WMS овърлеи от GeoServer на ИАГ (ловни райони, горска карта) към kade.si, с тикчета в менюто със слоеве като Hiking и Open Railway Map.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -21,9 +21,13 @@
         { title: 'ИАГ – Горска карта', layer: 'IAG:dleso_full_2022', opacity: 0.55 },
     ];
 
+    // Значка "NEW" до заглавието. ol-layerswitcher слага заглавието през innerHTML,
+    // затова HTML-ът минава и преживява прерисуване на менюто.
+    const NEW_BADGE = ' <span class="iag-new">NEW</span>';
+
     const makeLayer = (ol, { title, layer, opacity }) =>
         new ol.layer.Tile({
-            title, // ol-layerswitcher показва слоя по това заглавие
+            title: title + NEW_BADGE, // ol-layerswitcher показва слоя по това заглавие
             // без type:'base' => слоят е овърлей (тикче, не радио-бутон)
             visible: false, // стартира изключен, включва се с тикчето
             zIndex: 3, // над базовата карта и над ORM/Hiking (zIndex 1)
@@ -54,11 +58,22 @@
             tick();
         });
 
+    const injectStyle = () => {
+        const s = document.createElement('style');
+        s.textContent =
+            '.iag-new{display:inline-block;background:#e8521f;color:#fff;font:700 9px/1.4 system-ui,Arial,sans-serif;' +
+            'vertical-align:middle;padding:0 4px;margin-left:4px;border-radius:3px;letter-spacing:.5px}';
+        document.head.appendChild(s);
+    };
+
     const init = async () => {
         const { ol, map } = await waitForMap();
+        injectStyle();
 
+        // Вмъкваме в началото на колекцията => излизат най-долу в менюто (то рисува обърнато).
+        // Редът на картата не се влияе – управлява се от zIndex.
         for (const cfg of OVERLAYS) {
-            map.addLayer(makeLayer(ol, cfg));
+            map.getLayers().insertAt(0, makeLayer(ol, cfg));
         }
 
         // Накарай менюто със слоеве да се прерисува, за да се появят новите овърлеи веднага.
