@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.1.0
+// @version      2.2.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии/Natura) с тикчета в менюто, и popup при клик с инфо за точката. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -151,16 +151,20 @@
 
     const NEW_BADGE = ' <span class="iag-new">NEW</span>';
 
-    const makeOverlayLayer = (ol, { title, shortTitle, opacity, source }) =>
-        new ol.layer.Tile({
+    const makeOverlayLayer = (ol, { title, shortTitle, opacity, source }) => {
+        const layer = new ol.layer.Tile({
             title: title + NEW_BADGE, // ol-layerswitcher показва слоя по това заглавие
             shortTitle, // код за permalink логиката на kade.si
             // без type:'base' => слоят е овърлей (тикче, не радио-бутон)
-            visible: false,
+            visible: loadVis(shortTitle), // възстановяваме запомненото състояние
             zIndex: 3,
             opacity,
             source: source(ol),
         });
+        // запомняме при всяка промяна на видимостта (тикване/махване)
+        layer.on('change:visible', () => saveVis(shortTitle, layer.getVisible()));
+        return layer;
+    };
 
     // ===========================================================================
     // 2) ИНФО ПРИ КЛИК (popup)
@@ -341,6 +345,24 @@
     const saveInfo = () => {
         try {
             localStorage.setItem(INFO_KEY, infoEnabled ? '1' : '0');
+        } catch {
+            /* игнорираме */
+        }
+    };
+
+    // Видимост на всеки овърлей (вкл./изкл.) – запомнена в localStorage по shortTitle,
+    // за да оцелява и след рефреш, и в нова сесия.
+    const visKey = (shortTitle) => `iag-ov-${shortTitle}`;
+    const loadVis = (shortTitle) => {
+        try {
+            return localStorage.getItem(visKey(shortTitle)) === '1';
+        } catch {
+            return false;
+        }
+    };
+    const saveVis = (shortTitle, on) => {
+        try {
+            localStorage.setItem(visKey(shortTitle), on ? '1' : '0');
         } catch {
             /* игнорираме */
         }
