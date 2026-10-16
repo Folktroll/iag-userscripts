@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura овърлеи (слоеве)
 // @namespace    https://maps.iag.bg/
-// @version      1.3.0
+// @version      1.4.0
 // @description  Добавя прозрачни овърлеи към kade.si (ловни райони и горска карта от ИАГ, кадастрални граници от КАИС, защитени територии/Natura), с тикчета в менюто със слоеве като Hiking и Open Railway Map.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -36,14 +36,32 @@
     const NATURA_ATTR = '<a href="https://natura2000.egov.bg/" target="_blank">Natura 2000 BG</a>';
     const NATURA_REFERER = 'https://natura2000.egov.bg/';
 
+    // Мек контурен SLD за даден слой: само граница (без запълване), приглушен цвят,
+    // полупрозрачна линия. Подава се като SLD_BODY, за да замени ярко-червения default.
+    const softOutlineSLD = (layer, { color = '#a86b5c', width = 0.8, opacity = 0.6 } = {}) =>
+        '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">' +
+        `<NamedLayer><Name>${layer}</Name><UserStyle><FeatureTypeStyle><Rule><PolygonSymbolizer><Stroke>` +
+        `<CssParameter name="stroke">${color}</CssParameter>` +
+        `<CssParameter name="stroke-width">${width}</CssParameter>` +
+        `<CssParameter name="stroke-opacity">${opacity}</CssParameter>` +
+        '</Stroke></PolygonSymbolizer></Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>';
+
     // Източник: WMS слой от GeoServer на ИАГ (ACAO:* => може crossOrigin:'anonymous').
-    const iagSource = (ol, layer) =>
+    // `sld` (по избор) замества стила по подразбиране на слоя.
+    const iagSource = (ol, layer, sld) =>
         new ol.source.TileWMS({
             url: GEOSERVER,
             attributions: IAG_ATTR,
             crossOrigin: 'anonymous',
             serverType: 'geoserver',
-            params: { LAYERS: layer, TILED: true, FORMAT: 'image/png', TRANSPARENT: true },
+            params: {
+                LAYERS: layer,
+                TILED: true,
+                FORMAT: 'image/png',
+                TRANSPARENT: true,
+                ...(sld ? { SLD_BODY: sld } : {}),
+            },
         });
 
     // Общ ArcGIS източник през server-side export. Слоевете са в EPSG:7801, а картата
@@ -80,7 +98,11 @@
     // Редът тук = ред в менюто (отгоре надолу); последният ред излиза най-долу.
     const OVERLAYS = [
         { title: 'ИАГ – Ловни райони', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:lr_hunting_08_2024') },
-        { title: 'ИАГ – Горска карта', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:dleso_full_2022') },
+        {
+            title: 'ИАГ – Горска карта',
+            opacity: 0.45,
+            source: (ol) => iagSource(ol, 'IAG:dleso_full_2022', softOutlineSLD('IAG:dleso_full_2022')),
+        },
         {
             title: 'Кадастър (граници)',
             opacity: 0.8,
