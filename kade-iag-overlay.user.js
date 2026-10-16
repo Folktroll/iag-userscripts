@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         kade.si – ИАГ овърлеи (слоеве)
 // @namespace    https://maps.iag.bg/
-// @version      1.1.0
-// @description  Добавя прозрачни WMS овърлеи от GeoServer на ИАГ (ловни райони, горска карта) към kade.si, с тикчета в менюто със слоеве като Hiking и Open Railway Map.
+// @version      1.2.0
+// @description  Добавя прозрачни овърлеи към kade.si (ловни райони и горска карта от ИАГ, кадастрални граници от КАИС), с тикчета в менюто със слоеве като Hiking и Open Railway Map.
 // @match        https://kade.si/*
 // @run-at       document-idle
 // @grant        none
@@ -12,38 +12,51 @@
     'use strict';
 
     const GEOSERVER = 'https://maps.iag.bg/geoserver/wms';
-    const ATTR = '<a href="https://maps.iag.bg/" target="_blank">ИАГ</a>';
+    const IAG_ATTR = '<a href="https://maps.iag.bg/" target="_blank">ИАГ</a>';
+    const KAIS = 'https://arcgis.cadastre.bg/arcgisnopki/rest/services/ExternalKais/BoundariesCache/MapServer';
+    const KAIS_ATTR = '<a href="https://kais.cadastre.bg/" target="_blank">КАИС – Кадастър</a>';
 
-    // Овърлеи за добавяне. `layer` е името на WMS слоя, `opacity` – прозрачност (0–1).
+    // Източник: WMS слой от GeoServer на ИАГ (ACAO:* => може crossOrigin:'anonymous').
+    const iagSource = (ol, layer) =>
+        new ol.source.TileWMS({
+            url: GEOSERVER,
+            attributions: IAG_ATTR,
+            crossOrigin: 'anonymous',
+            serverType: 'geoserver',
+            params: { LAYERS: layer, TILED: true, FORMAT: 'image/png', TRANSPARENT: true },
+        });
+
+    // Източник: кадастрални граници (ArcGIS). Слоят е в EPSG:7801, затова ползваме
+    // server-side export – ol.source.TileArcGISRest праща bbox/imageSR в проекцията на
+    // картата (3857) и услугата препроектира. БЕЗ crossOrigin: ACAO е само за
+    // kais.cadastre.bg, но за показване на картинки четене на пиксели не е нужно.
+    const cadastreSource = (ol) =>
+        new ol.source.TileArcGISRest({
+            url: KAIS,
+            attributions: KAIS_ATTR,
+            params: { format: 'png', transparent: true },
+        });
+
+    // Овърлеи за добавяне. `source(ol)` връща OpenLayers източника; `opacity` – прозрачност.
     // Добави/махни редове тук, за да управляваш кои слоеве се предлагат.
     const OVERLAYS = [
-        { title: 'ИАГ – Ловни райони', layer: 'IAG:lr_hunting_08_2024', opacity: 0.55 },
-        { title: 'ИАГ – Горска карта', layer: 'IAG:dleso_full_2022', opacity: 0.55 },
+        { title: 'ИАГ – Ловни райони', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:lr_hunting_08_2024') },
+        { title: 'ИАГ – Горска карта', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:dleso_full_2022') },
+        { title: 'Кадастър (граници)', opacity: 0.8, source: cadastreSource },
     ];
 
     // Значка "NEW" до заглавието. ol-layerswitcher слага заглавието през innerHTML,
     // затова HTML-ът минава и преживява прерисуване на менюто.
     const NEW_BADGE = ' <span class="iag-new">NEW</span>';
 
-    const makeLayer = (ol, { title, layer, opacity }) =>
+    const makeLayer = (ol, { title, opacity, source }) =>
         new ol.layer.Tile({
             title: title + NEW_BADGE, // ol-layerswitcher показва слоя по това заглавие
             // без type:'base' => слоят е овърлей (тикче, не радио-бутон)
             visible: false, // стартира изключен, включва се с тикчето
             zIndex: 3, // над базовата карта и над ORM/Hiking (zIndex 1)
             opacity,
-            source: new ol.source.TileWMS({
-                url: GEOSERVER,
-                attributions: ATTR,
-                crossOrigin: 'anonymous', // GeoServer връща ACAO:* => безопасно за canvas/експорт
-                serverType: 'geoserver',
-                params: {
-                    LAYERS: layer,
-                    TILED: true,
-                    FORMAT: 'image/png',
-                    TRANSPARENT: true,
-                },
-            }),
+            source: source(ol),
         });
 
     const waitForMap = () =>
