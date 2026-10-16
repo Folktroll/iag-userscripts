@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.2.0
+// @version      2.3.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии/Natura) с тикчета в менюто, и popup при клик с инфо за точката. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -122,7 +122,7 @@
     // `shortTitle` – уникален код; нужен е за permalink логиката на kade.si (иначе при
     // зуум слой без shortTitle се включва принудително пак).
     const OVERLAYS = [
-        { title: 'ИАГ – Ловни райони', shortTitle: 'iaglov', opacity: 0.55, source: (ol) => iagTileSource(ol, 'IAG:lr_hunting_08_2024') },
+        { title: 'ИАГ – Ловни райони', shortTitle: 'iaglov', opacity: 0.55, defaultOn: true, source: (ol) => iagTileSource(ol, 'IAG:lr_hunting_08_2024') },
         {
             title: 'ИАГ – Горска карта',
             shortTitle: 'iaggora',
@@ -139,6 +139,7 @@
             title: 'Защитени територии (Natura/ЗЗТ)',
             shortTitle: 'natura',
             opacity: 0.6,
+            defaultOn: true,
             source: (ol) =>
                 arcgisSource(ol, {
                     url: NATURA,
@@ -151,12 +152,12 @@
 
     const NEW_BADGE = ' <span class="iag-new">NEW</span>';
 
-    const makeOverlayLayer = (ol, { title, shortTitle, opacity, source }) => {
+    const makeOverlayLayer = (ol, { title, shortTitle, opacity, source, defaultOn }) => {
         const layer = new ol.layer.Tile({
             title: title + NEW_BADGE, // ol-layerswitcher показва слоя по това заглавие
             shortTitle, // код за permalink логиката на kade.si
             // без type:'base' => слоят е овърлей (тикче, не радио-бутон)
-            visible: loadVis(shortTitle), // възстановяваме запомненото състояние
+            visible: loadVis(shortTitle, defaultOn), // запомненото състояние, иначе default
             zIndex: 3,
             opacity,
             source: source(ol),
@@ -353,11 +354,12 @@
     // Видимост на всеки овърлей (вкл./изкл.) – запомнена в localStorage по shortTitle,
     // за да оцелява и след рефреш, и в нова сесия.
     const visKey = (shortTitle) => `iag-ov-${shortTitle}`;
-    const loadVis = (shortTitle) => {
+    const loadVis = (shortTitle, defOn = false) => {
         try {
-            return localStorage.getItem(visKey(shortTitle)) === '1';
+            const v = localStorage.getItem(visKey(shortTitle));
+            return v === null ? defOn : v === '1'; // няма запис => default; иначе запомненото
         } catch {
-            return false;
+            return defOn;
         }
     };
     const saveVis = (shortTitle, on) => {
