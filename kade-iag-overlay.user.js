@@ -1,20 +1,40 @@
 // ==UserScript==
-// @name         kade.si – ИАГ овърлеи (слоеве)
+// @name         kade.si – ИАГ/КАИС/Natura овърлеи (слоеве)
 // @namespace    https://maps.iag.bg/
-// @version      1.2.0
-// @description  Добавя прозрачни овърлеи към kade.si (ловни райони и горска карта от ИАГ, кадастрални граници от КАИС), с тикчета в менюто със слоеве като Hiking и Open Railway Map.
+// @version      1.3.0
+// @description  Добавя прозрачни овърлеи към kade.si (ловни райони и горска карта от ИАГ, кадастрални граници от КАИС, защитени територии/Natura), с тикчета в менюто със слоеве като Hiking и Open Railway Map.
 // @match        https://kade.si/*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
+// @grant        unsafeWindow
+// @connect      natura2000.egov.bg
 // ==/UserScript==
 
 (() => {
     'use strict';
 
+    // При наличие на @grant скриптът е в sandbox – глобалните на kade.si (map, ol,
+    // layerSwitcher) се достигат през unsafeWindow.
+    const PAGE = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+    // GM_xmlhttpRequest (класически) или GM.xmlHttpRequest (нов API) – за заявки с
+    // подправен Referer, което <img> не позволява.
+    const gmXHR =
+        typeof GM_xmlhttpRequest !== 'undefined'
+            ? GM_xmlhttpRequest
+            : typeof GM !== 'undefined' && GM.xmlHttpRequest
+              ? GM.xmlHttpRequest.bind(GM)
+              : null;
+
     const GEOSERVER = 'https://maps.iag.bg/geoserver/wms';
     const IAG_ATTR = '<a href="https://maps.iag.bg/" target="_blank">ИАГ</a>';
     const KAIS = 'https://arcgis.cadastre.bg/arcgisnopki/rest/services/ExternalKais/BoundariesCache/MapServer';
     const KAIS_ATTR = '<a href="https://kais.cadastre.bg/" target="_blank">КАИС – Кадастър</a>';
+    const NATURA =
+        'https://natura2000.egov.bg/arcgis/sharing/servers/b2bf934051e14d62b6830428ec876262/rest/services/NaturaIntegration/AGKKIntegration/MapServer';
+    const NATURA_ATTR = '<a href="https://natura2000.egov.bg/" target="_blank">Natura 2000 BG</a>';
+    const NATURA_REFERER = 'https://natura2000.egov.bg/';
 
     // Източник: WMS слой от GeoServer на ИАГ (ACAO:* => може crossOrigin:'anonymous').
     const iagSource = (ol, layer) =>
@@ -26,23 +46,57 @@
             params: { LAYERS: layer, TILED: true, FORMAT: 'image/png', TRANSPARENT: true },
         });
 
-    // Източник: кадастрални граници (ArcGIS). Слоят е в EPSG:7801, затова ползваме
-    // server-side export – ol.source.TileArcGISRest праща bbox/imageSR в проекцията на
-    // картата (3857) и услугата препроектира. БЕЗ crossOrigin: ACAO е само за
-    // kais.cadastre.bg, но за показване на картинки четене на пиксели не е нужно.
-    const cadastreSource = (ol) =>
-        new ol.source.TileArcGISRest({
-            url: KAIS,
-            attributions: KAIS_ATTR,
-            params: { format: 'png', transparent: true },
-        });
+    // Общ ArcGIS източник през server-side export. Слоевете са в EPSG:7801, а картата
+    // е в 3857 – TileArcGISRest праща bbox/imageSR в 3857 и услугата препроектира.
+    // `referer` (по избор): услугата пази плочките зад проверка на Referer, затова
+    // ги теглим през GM_xmlhttpRequest с подправен Referer и ги подаваме като blob.
+    const arcgisSource = (ol, { url, attr, params, referer }) => {
+        const src = new ol.source.TileArcGISRest({ url, attributions: attr, params });
+        if (referer && gmXHR) {
+            src.setTileLoadFunction((tile, tileUrl) => {
+                gmXHR({
+                    method: 'GET',
+                    url: tileUrl,
+                    responseType: 'blob',
+                    headers: { Referer: referer },
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300 && res.response) {
+                            const objUrl = URL.createObjectURL(res.response);
+                            const img = tile.getImage();
+                            img.onload = img.onerror = () => URL.revokeObjectURL(objUrl);
+                            img.src = objUrl;
+                        } else {
+                            tile.setState(ol.TileState.ERROR);
+                        }
+                    },
+                    onerror: () => tile.setState(ol.TileState.ERROR),
+                });
+            });
+        }
+        return src;
+    };
 
     // Овърлеи за добавяне. `source(ol)` връща OpenLayers източника; `opacity` – прозрачност.
-    // Добави/махни редове тук, за да управляваш кои слоеве се предлагат.
+    // Редът тук = ред в менюто (отгоре надолу); последният ред излиза най-долу.
     const OVERLAYS = [
         { title: 'ИАГ – Ловни райони', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:lr_hunting_08_2024') },
         { title: 'ИАГ – Горска карта', opacity: 0.55, source: (ol) => iagSource(ol, 'IAG:dleso_full_2022') },
-        { title: 'Кадастър (граници)', opacity: 0.8, source: cadastreSource },
+        {
+            title: 'Кадастър (граници)',
+            opacity: 0.8,
+            source: (ol) => arcgisSource(ol, { url: KAIS, attr: KAIS_ATTR, params: { format: 'png', transparent: true } }),
+        },
+        {
+            title: 'Защитени територии (Natura/ЗЗТ)',
+            opacity: 0.6,
+            source: (ol) =>
+                arcgisSource(ol, {
+                    url: NATURA,
+                    attr: NATURA_ATTR,
+                    referer: NATURA_REFERER,
+                    params: { format: 'PNG32', transparent: true, dpi: 90, layers: 'show:9,10,21,12,13,14,15' },
+                }),
+        },
     ];
 
     // Значка "NEW" до заглавието. ol-layerswitcher слага заглавието през innerHTML,
@@ -62,8 +116,8 @@
     const waitForMap = () =>
         new Promise((resolve) => {
             const tick = () => {
-                if (window.map && window.ol && typeof window.map.addLayer === 'function') {
-                    resolve({ ol: window.ol, map: window.map });
+                if (PAGE.map && PAGE.ol && typeof PAGE.map.addLayer === 'function') {
+                    resolve({ ol: PAGE.ol, map: PAGE.map });
                 } else {
                     setTimeout(tick, 300);
                 }
@@ -91,14 +145,14 @@
 
         // Накарай менюто със слоеве да се прерисува, за да се появят новите овърлеи веднага.
         try {
-            if (window.layerSwitcher && typeof window.layerSwitcher.renderPanel === 'function') {
-                window.layerSwitcher.renderPanel();
+            if (PAGE.layerSwitcher && typeof PAGE.layerSwitcher.renderPanel === 'function') {
+                PAGE.layerSwitcher.renderPanel();
             }
         } catch {
             /* ако не стане – слоевете пак ще се появят при следващо отваряне на менюто */
         }
 
-        console.log(`[kade-iag-overlay] добавени ${OVERLAYS.length} овърлея от ИАГ.`);
+        console.log(`[kade-iag-overlay] добавени ${OVERLAYS.length} овърлея.`);
     };
 
     init();
