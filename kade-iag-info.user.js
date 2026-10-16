@@ -1,20 +1,60 @@
 // ==UserScript==
 // @name         kade.si – ИАГ информация при клик
 // @namespace    https://maps.iag.bg/
-// @version      1.0.0
-// @description  При клик върху картата на kade.si показва ловния район и горска информация от GeoServer на ИАГ.
+// @version      1.1.0
+// @description  При клик върху картата на kade.si показва ловния район, горска информация (ИАГ) и защитените зони (Natura/ЗЗТ) за точката.
 // @match        https://kade.si/*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
+// @grant        unsafeWindow
+// @connect      natura2000.egov.bg
 // ==/UserScript==
 
 (() => {
     'use strict';
 
+    // При наличие на @grant скриптът е в sandbox – глобалните на kade.si се достигат
+    // през unsafeWindow.
+    const PAGE = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
     const GEOSERVER = 'https://maps.iag.bg/geoserver/wms';
+    const NATURA =
+        'https://natura2000.egov.bg/arcgis/sharing/servers/b2bf934051e14d62b6830428ec876262/rest/services/NaturaIntegration/AGKKIntegration/MapServer';
+    const NATURA_REFERER = 'https://natura2000.egov.bg/';
+
+    // GM_xmlhttpRequest (класически) или GM.xmlHttpRequest (нов API) – нужен за Natura,
+    // защото услугата иска Referer natura2000.egov.bg, който обикновен fetch/img не може
+    // да подправи.
+    const gmXHR =
+        typeof GM_xmlhttpRequest !== 'undefined'
+            ? GM_xmlhttpRequest
+            : typeof GM !== 'undefined' && GM.xmlHttpRequest
+              ? GM.xmlHttpRequest.bind(GM)
+              : null;
+
+    const gmGetJSON = (url, referer) =>
+        new Promise((resolve, reject) => {
+            if (!gmXHR) {
+                reject(new Error('GM_xmlhttpRequest липсва'));
+                return;
+            }
+            gmXHR({
+                method: 'GET',
+                url,
+                headers: { Referer: referer },
+                onload: (res) => {
+                    try {
+                        resolve(JSON.parse(res.responseText));
+                    } catch (e) {
+                        reject(e);
+                    }
+                },
+                onerror: () => reject(new Error('мрежова грешка')),
+            });
+        });
 
     // Слоеве и показвани полета — същата идея като iag-lookup.mjs.
-    // За да махнеш горския слой, просто изтрий втория обект от масива.
     const LAYERS = [
         {
             name: 'IAG:lr_hunting_08_2024',
@@ -52,7 +92,7 @@
         return label ? `${label}: ${val}` : val;
     };
 
-    // Запитване към един слой за точка [x, y] в EPSG:3857.
+    // Запитване към един WMS слой на ИАГ за точка [x, y] в EPSG:3857.
     const queryLayer = async (layer, x, y) => {
         const d = 3; // ±3 м bbox около точката
         const bbox = `${x - d},${y - d},${x + d},${y + d}`;
@@ -84,12 +124,41 @@
         return records;
     };
 
+    // Привежда името на подслой до „вид зона“ (маха надписи/контур/полигони).
+    const cleanType = (name) =>
+        String(name || '')
+            .replace(/\s*надписи$/, '')
+            .replace(/\s*-\s*(обобщен|детайлен)\s*контур$/, '')
+            .replace(/\s*\((полигони|точки)\)$/, '')
+            .trim();
+
+    // Защитени зони/територии за точка [x, y] (EPSG:3857) чрез ArcGIS identify.
+    const queryNatura = async (x, y) => {
+        const d = 120;
+        const ext = `${x - d},${y - d},${x + d},${y + d}`;
+        const url =
+            `${NATURA}/identify?geometry=${x},${y}&geometryType=esriGeometryPoint&sr=3857` +
+            `&tolerance=3&mapExtent=${ext}&imageDisplay=256,256,96&layers=all&returnGeometry=false&f=json`;
+        const data = await gmGetJSON(url, NATURA_REFERER);
+        const seen = new Set();
+        const lines = [];
+        for (const r of data.results ?? []) {
+            const type = cleanType(r.layerName);
+            const name = r.value == null ? '' : String(r.value).trim();
+            if (!name) continue;
+            const key = `${type}|${name}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            lines.push(type ? `${type}: ${name}` : name);
+        }
+        return lines;
+    };
+
     // --- popup (ol.Overlay) ---------------------------------------------------
     const buildPopup = (ol, map) => {
         const el = document.createElement('div');
         el.className = 'iag-popup';
-        el.innerHTML =
-            '<a href="#" class="iag-popup__close">×</a><div class="iag-popup__body"></div>';
+        el.innerHTML = '<a href="#" class="iag-popup__close">×</a><div class="iag-popup__body"></div>';
         const overlay = new ol.Overlay({
             element: el,
             autoPan: { animation: { duration: 200 } },
@@ -107,14 +176,14 @@
     };
 
     const renderResults = (results, lat, lon) => {
-        const esc = (s) =>
-            String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
         let html = `<div class="iag-popup__coords">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>`;
         let any = false;
         for (const { layer, records } of results) {
             for (const lines of records) {
                 any = true;
-                html += `<div class="iag-popup__sec"><span class="iag-popup__tag">${esc(layer.title)}</span>`;
+                const tagClass = layer.tagClass ? ` iag-popup__tag--${layer.tagClass}` : '';
+                html += `<div class="iag-popup__sec"><span class="iag-popup__tag${tagClass}">${esc(layer.title)}</span>`;
                 html += lines.map((l) => `<div>${esc(l)}</div>`).join('');
                 html += '</div>';
             }
@@ -137,6 +206,7 @@
 .iag-popup__sec:first-of-type{margin-top:0}
 .iag-popup__tag{display:inline-block;font-size:11px;font-weight:700;color:#2b6a2b;
   background:#e8f3e8;border-radius:4px;padding:0 6px;margin-bottom:2px}
+.iag-popup__tag--nature{color:#1d5f7a;background:#e1f0f6}
 .iag-popup__empty{color:#888;font-style:italic}`;
         const s = document.createElement('style');
         s.textContent = css;
@@ -147,8 +217,8 @@
     const waitForMap = () =>
         new Promise((resolve) => {
             const tick = () => {
-                if (window.map && window.ol && typeof window.map.on === 'function') {
-                    resolve({ ol: window.ol, map: window.map });
+                if (PAGE.map && PAGE.ol && typeof PAGE.map.on === 'function') {
+                    resolve({ ol: PAGE.ol, map: PAGE.map });
                 } else {
                     setTimeout(tick, 300);
                 }
@@ -167,9 +237,14 @@
             overlay.setPosition(evt.coordinate);
             body.innerHTML = '<div class="iag-popup__empty">Зареждане…</div>';
             try {
-                const results = await Promise.all(
-                    LAYERS.map(async (layer) => ({ layer, records: await queryLayer(layer, x, y) })),
-                );
+                const [iagResults, naturaLines] = await Promise.all([
+                    Promise.all(LAYERS.map(async (layer) => ({ layer, records: await queryLayer(layer, x, y) }))),
+                    queryNatura(x, y).catch(() => []), // при блокиран GM просто пропускаме секцията
+                ]);
+                const results = [...iagResults];
+                if (naturaLines.length) {
+                    results.push({ layer: { title: 'Защитени зони', tagClass: 'nature' }, records: [naturaLines] });
+                }
                 body.innerHTML = renderResults(results, lat, lon);
             } catch (err) {
                 body.innerHTML = `<div class="iag-popup__empty">Грешка: ${err.message}</div>`;
