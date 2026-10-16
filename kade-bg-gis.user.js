@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.3.0
+// @version      2.4.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии/Natura) с тикчета в менюто, и popup при клик с инфо за точката. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @run-at       document-idle
@@ -176,6 +176,7 @@
         {
             name: 'IAG:lr_hunting_08_2024',
             title: 'Лов',
+            tagClass: 'hunt',
             key: null,
             fields: [
                 ['lr', ''],
@@ -327,6 +328,7 @@
 .iag-popup__tag{display:inline-block;font-size:11px;font-weight:700;color:#2b6a2b;
   background:#e8f3e8;border-radius:4px;padding:0 6px;margin-bottom:2px}
 .iag-popup__tag--nature{color:#1d5f7a;background:#e1f0f6}
+.iag-popup__tag--hunt{color:#b5651d;background:#fbe6d0}
 .iag-popup__empty{color:#888;font-style:italic}`;
         const s = document.createElement('style');
         s.textContent = css;
@@ -408,10 +410,12 @@
                     Promise.all(INFO_LAYERS.map(async (layer) => ({ layer, records: await queryInfoLayer(layer, x, y) }))),
                     queryNatura(x, y).catch(() => []),
                 ]);
-                const results = [...iagResults];
+                // ред в popup-а: Защитени зони, Гора, Лов
+                const results = [];
                 if (naturaLines.length) {
                     results.push({ layer: { title: 'Защитени зони', tagClass: 'nature' }, records: [naturaLines] });
                 }
+                results.push(...iagResults.reverse()); // INFO_LAYERS е [Лов, Гора] => reverse дава [Гора, Лов]
                 body.innerHTML = renderResults(results, lat, lon);
             } catch (err) {
                 body.innerHTML = `<div class="iag-popup__empty">Грешка: ${err.message}</div>`;
