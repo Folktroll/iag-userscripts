@@ -8,6 +8,7 @@ Userscripts and a small CLI around Изпълнителна агенция по 
 
 - `iag-geoserver-fix.user.js` — fixes the MapStore viewer (`maps.iag.bg/mapstore/#/viewer/<id>`), whose config points layers at an internal GeoServer (`http://172.16.4.132:5088/geoserver/...`). Rewrites that origin to `https://maps.iag.bg/geoserver/...` across `fetch`, `XMLHttpRequest` (URL **and** response bodies, so the config is corrected before MapStore parses it — the primary fix) and `<img>` src as a fallback.
 - `kade-iag-info.user.js` — on kade.si (OpenLayers; exposes globals `map` and `ol`), adds a `singleclick` handler that queries IAG GeoServer `GetFeatureInfo` and shows results in an `ol.Overlay` popup.
+- `kade-iag-overlay.user.js` — on kade.si, adds IAG layers as semi-transparent WMS **GetMap** overlays (`ol.source.TileWMS`). kade.si's overlays (ORM, Hiking in `main.js`) are `ol.layer.Tile` with a `title` and no `type:'base'`; ol-layerswitcher (global `layerSwitcher`) then shows them as checkboxes. Call `layerSwitcher.renderPanel()` after `map.addLayer` so they appear immediately.
 - `iag-lookup.mjs` — CLI of the same lookup: `node iag-lookup.mjs <lat> <lon>` (also accepts `"lat,lon"`). Node 18+, no deps.
 
 ## Key facts about the data
