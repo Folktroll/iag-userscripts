@@ -1,9 +1,13 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/Natura слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.4.0
+// @version      2.5.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии/Natura) с тикчета в менюто, и popup при клик с инфо за точката. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
+// @homepageURL  https://github.com/Folktroll/iag-userscripts
+// @supportURL   https://github.com/Folktroll/iag-userscripts/issues
+// @downloadURL  https://raw.githubusercontent.com/Folktroll/iag-userscripts/main/kade-bg-gis.user.js
+// @updateURL    https://raw.githubusercontent.com/Folktroll/iag-userscripts/main/kade-bg-gis.user.js
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest

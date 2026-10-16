@@ -1,9 +1,13 @@
 // ==UserScript==
 // @name         IAG MapStore – fix GeoServer URLs
 // @namespace    https://maps.iag.bg/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Пренасочва заявките към вътрешния GeoServer (172.16.4.132:5088) към https://maps.iag.bg
 // @match        https://maps.iag.bg/*
+// @homepageURL  https://github.com/Folktroll/iag-userscripts
+// @supportURL   https://github.com/Folktroll/iag-userscripts/issues
+// @downloadURL  https://raw.githubusercontent.com/Folktroll/iag-userscripts/main/iag-geoserver-fix.user.js
+// @updateURL    https://raw.githubusercontent.com/Folktroll/iag-userscripts/main/iag-geoserver-fix.user.js
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
