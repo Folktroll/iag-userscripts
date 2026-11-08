@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/ЗТ слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.9.4
+// @version      2.9.5
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии) с тикчета в менюто, и popup при клик с инфо за точката – включително режим на дейности (какво може/не може) от регистъра на ЗТ. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @homepageURL  https://github.com/Folktroll/iag-userscripts
@@ -643,6 +643,8 @@
 .iag-popup__close:hover{color:#000}
 .iag-popup__coords{font-size:11px;color:#888;margin-bottom:6px}
 .iag-popup__elev{font-weight:700;color:#3a6ea5;font-size:12px}
+.iag-marker{width:14px;height:14px;border-radius:50%;background:#e8521f;border:2.5px solid #fff;
+  box-shadow:0 0 3px rgba(0,0,0,.45);box-sizing:border-box;pointer-events:none}
 .iag-popup__sec{margin-top:8px}
 .iag-popup__sec:first-of-type{margin-top:0}
 .iag-popup__tag{display:inline-block;font-size:11px;font-weight:700;color:#2b6a2b;
@@ -816,24 +818,12 @@
         try {
             const HL_COLORS = { nature: '#1d5f7a', forest: '#2b6a2b', hunt: '#b5651d' };
             const geojson = new ol.format.GeoJSON();
-            const esri = new ol.format.EsriJSON();
             highlightSource = new ol.source.Vector();
             const highlightLayer = new ol.layer.Vector({
                 source: highlightSource,
                 zIndex: 50,
                 style: (feature) => {
-                    const kind = feature.get('kind');
-                    if (kind === 'point') {
-                        // маркер на кликнатата точка – по-едър, за да се вижда ясно
-                        return new ol.style.Style({
-                            image: new ol.style.Circle({
-                                radius: 7,
-                                fill: new ol.style.Fill({ color: '#e8521f' }),
-                                stroke: new ol.style.Stroke({ color: '#fff', width: 2.5 }),
-                            }),
-                        });
-                    }
-                    const c = HL_COLORS[kind] || '#333';
+                    const c = HL_COLORS[feature.get('kind')] || '#333';
                     return new ol.style.Style({
                         stroke: new ol.style.Stroke({ color: c, width: 3 }),
                         fill: new ol.style.Fill({ color: c + '22' }),
@@ -870,18 +860,27 @@
             };
 
             drawHighlights = async (iagResults, protAreas) => {
-                // Защитени територии – геометрията вече е дошла с identify
-                const nature = [];
-                for (const pa of protAreas) {
-                    if (!pa.geomRings) continue;
-                    try {
-                        const f = new ol.Feature({ geometry: esri.readGeometry(pa.geomRings) });
-                        f.set('kind', 'nature');
-                        nature.push(f);
-                    } catch {
-                        /* пропускаме невалидна геометрия */
-                    }
+                // Защитени територии – геометрията вече е дошла с identify. EsriJSON го
+                // създаваме „мързеливо“: ако липсва в билда, пада само ЗТ очертанието,
+                // а гора/лов (GeoJSON) си работят.
+                let esri = null;
+                try {
+                    esri = new ol.format.EsriJSON();
+                } catch {
+                    /* няма EsriJSON – без ЗТ очертание */
                 }
+                const nature = [];
+                if (esri)
+                    for (const pa of protAreas) {
+                        if (!pa.geomRings) continue;
+                        try {
+                            const f = new ol.Feature({ geometry: esri.readGeometry(pa.geomRings) });
+                            f.set('kind', 'nature');
+                            nature.push(f);
+                        } catch {
+                            /* пропускаме невалидна геометрия */
+                        }
+                    }
                 if (nature.length) highlightSource.addFeatures(nature);
                 // IAG слоеве (гора/лов) – теглят се през WFS
                 const lists = await Promise.all(iagResults.map((r) => fetchIagGeom(r.layer, r.values).catch(() => [])));
@@ -899,8 +898,19 @@
             console.warn('[kade-iag] очертаване недостъпно:', e);
         }
 
+        // --- маркер на кликнатата точка (независим HTML overlay – винаги работи,
+        //     дори vector слоят/EsriJSON да липсват) ---
+        const markerEl = document.createElement('div');
+        markerEl.className = 'iag-marker';
+        const markerOverlay = new ol.Overlay({ element: markerEl, positioning: 'center-center', stopEvent: false });
+        map.addOverlay(markerOverlay);
+        const clearMarks = () => {
+            highlightSource?.clear();
+            markerOverlay.setPosition(undefined);
+        };
+
         // --- popup при клик ---
-        const { overlay, body } = buildPopup(ol, map, () => highlightSource?.clear());
+        const { overlay, body } = buildPopup(ol, map, clearMarks);
 
         map.on('singleclick', async (evt) => {
             if (!infoEnabled) return;
@@ -909,16 +919,7 @@
             overlay.setPosition(evt.coordinate);
             body.innerHTML = '<div class="iag-popup__empty">Зареждане…</div>';
             highlightSource?.clear(); // махаме очертанието от предишния клик
-            // маркер на кликнатата точка – за да се вижда за коя точка е инфото
-            if (highlightSource) {
-                try {
-                    const pt = new ol.Feature({ geometry: new ol.geom.Point(evt.coordinate) });
-                    pt.set('kind', 'point');
-                    highlightSource.addFeature(pt);
-                } catch {
-                    /* ако липсва ol.geom.Point – пропускаме маркера */
-                }
-            }
+            markerOverlay.setPosition(evt.coordinate); // маркер на кликнатата точка
             // надморска височина – тегли се паралелно, не блокира текста
             const elevP = fetchElevation(lat, lon).catch(() => null);
             try {
@@ -987,7 +988,7 @@
                     saveInfo();
                     if (!infoEnabled) {
                         overlay.setPosition(undefined); // скрий отворения popup
-                        highlightSource?.clear(); // и очертанията
+                        clearMarks(); // очертания + маркер
                     }
                 });
                 const layersLi = makeCheckRow('iag-layers-row', 'iag-layers-toggle', 'Всички базови слоеве' + NEW_BADGE, showAllLayers, (on) => {
