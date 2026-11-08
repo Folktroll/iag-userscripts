@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/ЗТ слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.8.0
+// @version      2.9.0
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии) с тикчета в менюто, и popup при клик с инфо за точката – включително режим на дейности (какво може/не може) от регистъра на ЗТ. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @homepageURL  https://github.com/Folktroll/iag-userscripts
@@ -174,6 +174,7 @@
                     erosion: p.EROSION,
                     humidity: p.HUMIDITY,
                     relief: p.RELIEF,
+                    state: p.STATE,
                     stages: new Map(),
                 };
                 stands.set(kid, st);
@@ -243,9 +244,10 @@
         // ВАЖНО: броим само ИЗВЪН-нормалните сигнали. „Средно каменливо“ (~70%),
         // издънкова гора (~80%) и разновъзрастна структура (~60%) са НОРМАТА за БГ
         // гора – ако ги броим, всичко излиза трудно. Затова ги пропускаме.
-        // каменливост – само силната (+2: сама по себе си „затруднена“, не „трудна“;
-        // каменист но равен терен не бива да е „трудна“ – трудна става с наклон/подлес)
-        if (lc(st.stony).includes('силно')) add(2, 'силно каменливо');
+        // каменливост – само силната, и то слабо (+1). Само по себе си каменливо (дори
+        // „силно“) НЕ е трудно – минава се. Става пречка в КОМБИНАЦИЯ с наклон или
+        // къпини/трънки (подлес); сумирането го дава естествено.
+        if (lc(st.stony).includes('силно')) add(1, 'силно каменливо');
         // вид на покритието
         const vp = lc(st.vidpod);
         const open = /поляна|просека|път|изредена/.test(vp);
@@ -261,23 +263,61 @@
         if (/мокра|преувлажнена|заблатена|мочур/.test(lc(st.humidity))) add(2, 'мокро/мочурливо');
         // падина – влажно понижение, често обрасло (NB: само „падина“, не „долна“!)
         if (/падина/.test(lc(st.relief))) add(1, 'падина');
-        // Стръмност (среден наклон на подотдела). NB: това е УСРЕДНЕНО за полигона и
-        // системно подценява локалния наклон, затова тежи осезаемо.
-        const sl = Number(st.slope) || 0;
-        if (sl >= 35) add(3, 'много стръмно');
-        else if (sl >= 28) add(2, 'стръмно');
-        else if (sl >= 22) add(1, 'наклонено');
-        // ниска гъста растителност: подлес/подраст или млад гъсталак
+        // ТРЪНИ/КЪПИНИ – най-тежката пречка („нямаш шанс“). Записват се в различни полета
+        // (често слой с празно STAGE → „състав“) и слабо зависят от „пълнота“, затова ги
+        // мерим по ДЯЛ (PART), независимо къде са. После: именуван подлес/подраст по
+        // гъстота; нисък гъст етаж (млад гъсталак).
+        const THORNY = /къпина|къпинак|драка|трън|глог|шипка|смрадлика|хвойна|клек|папрат/i;
+        let groundVeg = false; // реална приземна пречка (блокира кредита за качество)
         for (const stg of st.stages.values()) {
             if (!stg.species.size) continue;
             const spTxt = [...stg.species.keys()].slice(0, 2).join(', ');
-            if (/подлес|подраст/i.test(stg.name)) {
-                if (stg.fullness >= 6) add(3, `гъст ${stg.name.toLowerCase()}${spTxt ? ` (${spTxt})` : ''}`);
-                else if (stg.fullness >= 3) add(2, `${stg.name.toLowerCase()}${spTxt ? ` (${spTxt})` : ''}`);
-            } else if (/етаж/i.test(stg.name)) {
-                if (stg.minHeight <= 4 && stg.fullness >= 7) add(2, `млад гъсталак${spTxt ? ` (${spTxt})` : ''}`);
+            const thornyPart = [...stg.species].filter(([sp]) => THORNY.test(sp)).reduce((a, [, p]) => a + (Number(p) || 0), 0);
+            if (thornyPart >= 7) {
+                add(4, `гъсти тръни/къпини (${spTxt})`);
+                groundVeg = true;
+            } else if (thornyPart >= 4) {
+                add(3, `тръни/къпини (${spTxt})`);
+                groundVeg = true;
+            } else if (thornyPart >= 1) {
+                add(1, `единични тръни/къпини (${spTxt})`);
+            } else if (/подлес|подраст/i.test(stg.name)) {
+                if (stg.fullness >= 6) {
+                    add(3, `гъст ${stg.name.toLowerCase()} (${spTxt})`);
+                    groundVeg = true;
+                } else if (stg.fullness >= 3) {
+                    add(2, `${stg.name.toLowerCase()} (${spTxt})`);
+                    groundVeg = true;
+                }
+            } else if (/етаж/i.test(stg.name) && stg.minHeight <= 4 && stg.fullness >= 7) {
+                add(2, `млад гъсталак (${spTxt})`);
+                groundVeg = true;
             }
         }
+        // Стръмност – тежи СЛАБО: стръмно „може да е трудно, но се минава“. Само по себе
+        // си най-много „затруднена“, не „трудна“. NB: SLOPE е усреднен за подотдела.
+        const sl = Number(st.slope) || 0;
+        if (sl >= 38) add(2, 'много стръмно');
+        else if (sl >= 28) add(1, 'стръмно');
+        // Кредит за качество: чиста зряла затворена гора (БЕЗ подлес/тръни) е по-лесна,
+        // дори с втори етаж от високи дървета → компенсира наклон/каменливо.
+        const penalty = score; // индексът само от пречките (преди кредита)
+        const treeStages = [...st.stages.values()].filter((s) => s.species.size && /етаж/i.test(s.name));
+        const mainTree = treeStages.find((s) => /I\s*ета/i.test(s.name)) || treeStages[0];
+        if (mainTree && !groundVeg && (Number(mainTree.age) || 0) >= 60 && mainTree.fullness >= 6) {
+            if (/добро/i.test(lc(st.state))) {
+                score -= 2;
+                factors.push('✓ зряла гора, добро състояние');
+            } else {
+                score -= 1;
+                factors.push('✓ зряла гора');
+            }
+        }
+        if (score < 0) score = 0;
+        // Предпазливо: трудността е относителна → по-добре да надценим. Кредитът за
+        // качество може да смекчи трудна→затруднена, но НЕ прави „добра“, ако е имало
+        // реална пречка (penalty ≥ среден праг). Така наклон/камениво не изчезват.
+        if (penalty >= PASS_T.med && score < PASS_T.med) score = PASS_T.med;
         // предпазлив буфер върху индекса, после праг
         const adj = score * (1 + PASS_CAUTION);
         // открит терен (поляна/просека/път) – сваляме, ако няма тежка пречка
@@ -297,6 +337,10 @@
                 ['lr', ''],
                 ['lovishte', 'ловище'],
             ],
+            // NB: не добавяме извод „не се ловува“ за развъдник – по ЗЛОД (чл. 54) ловът
+            // там е забранен, но данните в слоя не са надеждни (срещат се развъдници, в
+            // които реално се ловува), затова категорично твърдение би подвело. Полето
+            // „ловище: развъдник“ се показва както си е и читателят си преценява.
         },
         {
             name: 'IAG:dleso_full_2022',
@@ -304,7 +348,7 @@
             key: 'key_id',
             geomMode: 'cql', // очертаване: WFS по key_id (fid-- форматът не се резолвва)
             // Връща по ред на дървесен вид → теглим тези полета и ги агрегираме.
-            queryFields: ['TR_SP', 'PART', 'AGE', 'SLOPE', 'STAGE', 'FULLNESS', 'HEIGHT', 'STONY', 'VIDPOD', 'DAMAGE', 'EROSION', 'HUMIDITY', 'RELIEF'],
+            queryFields: ['TR_SP', 'PART', 'AGE', 'SLOPE', 'STAGE', 'FULLNESS', 'HEIGHT', 'STONY', 'VIDPOD', 'DAMAGE', 'EROSION', 'HUMIDITY', 'RELIEF', 'STATE'],
             aggregate: aggregateForest,
         },
     ];
@@ -368,6 +412,10 @@
             const dedupKey = layer.key && !blank(p[layer.key]) ? String(p[layer.key]) : lines.join('|');
             if (seen.has(dedupKey)) continue;
             seen.add(dedupKey);
+            if (layer.note) {
+                const nt = layer.note(p);
+                if (nt) lines.push(nt);
+            }
             records.push(lines);
             if (f.id) values.push(f.id);
         }
@@ -658,6 +706,78 @@
         }
     };
 
+    // --- управление на базовите слоеве на kade.si -----------------------------
+    // Излишни базови слоеве – скриваме ги от менюто по подразбиране (сравнява се
+    // нормализирано: малки букви, без интервали/тирета/долни черти).
+    const CLUTTER_LAYERS = [
+        'sentinel-2',
+        'bgtopo-100k',
+        'bgtopovj-100k',
+        'etk-5k-10k',
+        'bgtopo-1933',
+        'bgtopo-126k',
+        'bgtopo-210k',
+        'gkme-200k',
+        'seetopo',
+        // Hiking и Open Railway Map ги включваме по подразбиране, но и тях скриваме –
+        // чекбоксовете им са излишни (не ги пипаш).
+        'hiking',
+        'openrailwaymap',
+    ];
+    // Слоеве, които включваме по подразбиране (веднъж при зареждане).
+    const ENABLE_LAYERS = ['hiking', 'openrailwaymap'];
+    const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s_-]+/g, '');
+
+    // Чекбокс „Всички базови слоеве“ – показва/скрива излишните. По подразбиране скрити.
+    const LAYERS_KEY = 'iag-show-all-layers';
+    let showAllLayers = false;
+    try {
+        showAllLayers = localStorage.getItem(LAYERS_KEY) === '1';
+    } catch {
+        /* default */
+    }
+    const saveShowAll = () => {
+        try {
+            localStorage.setItem(LAYERS_KEY, showAllLayers ? '1' : '0');
+        } catch {
+            /* игнорираме */
+        }
+    };
+
+    // Скрива/показва излишните редове в панела според showAllLayers.
+    const applyClutter = (ul) => {
+        for (const li of ul.querySelectorAll('li')) {
+            if (li.classList.contains('iag-info-row') || li.classList.contains('iag-sep') || li.classList.contains('iag-layers-row')) continue;
+            const t = norm(li.textContent);
+            if (CLUTTER_LAYERS.some((n) => t.includes(norm(n)))) li.style.display = showAllLayers ? '' : 'none';
+        }
+    };
+
+    // Включва по подразбиране зададените слоеве (Hiking, Open Railway Map) – веднъж.
+    const enableDefaultLayers = (map) => {
+        const walk = (layers) => {
+            layers.forEach((l) => {
+                if (l.getLayers) {
+                    walk(l.getLayers());
+                    return;
+                }
+                const t = norm(l.get && l.get('title'));
+                if (t && ENABLE_LAYERS.some((n) => t.includes(norm(n)))) {
+                    try {
+                        l.setVisible(true);
+                    } catch {
+                        /* игнорираме */
+                    }
+                }
+            });
+        };
+        try {
+            walk(map.getLayers());
+        } catch {
+            /* игнорираме */
+        }
+    };
+
     // ===========================================================================
     // Изчакване на картата
     // ===========================================================================
@@ -681,6 +801,9 @@
         for (const cfg of OVERLAYS) {
             map.getLayers().insertAt(0, makeOverlayLayer(ol, cfg));
         }
+
+        // включваме по подразбиране Hiking + Open Railway Map (веднъж)
+        enableDefaultLayers(map);
 
         // --- очертаване на районите при клик ---------------------------------
         // Тънък vector слой най-отгоре; геометрията се тегли по ключ/ид (гора/лов през
@@ -804,44 +927,57 @@
             }
         });
 
-        // --- тикче „Инфо при клик“ + разделител, най-горе в нашата група ---
-        // Ред в менюто: разделител → Инфо при клик → овърлеите (ЗТ, Лов, Кадастър).
+        // Прави ред с чекбокс (id, етикет, начало, при промяна). Връща <li>.
+        const makeCheckRow = (cls, id, labelHtml, checked, onChange) => {
+            const li = document.createElement('li');
+            li.className = cls;
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.id = id;
+            input.checked = checked;
+            input.addEventListener('change', () => onChange(input.checked));
+            const label = document.createElement('label');
+            label.htmlFor = id;
+            label.innerHTML = labelHtml;
+            li.appendChild(input);
+            li.appendChild(label);
+            return li;
+        };
+
+        // --- нашите тикчета + разделител, най-горе в нашата група ---
+        // Ред в менюто: разделител → Инфо при клик → Всички базови слоеве → овърлеите.
         const addInfoRow = (panel) => {
             const ul = panel && panel.querySelector('ul');
             if (!ul) return;
-            if (ul.querySelector('#iag-info-toggle')) return; // вече е добавено при този render
-            // първият ред със значка „NEW“, който НЕ е тикчето – това е първият наш овърлей
-            const firstOurs = [...ul.querySelectorAll('li')].find(
-                (li) => li.querySelector('.iag-new') && !li.classList.contains('iag-info-row'),
-            );
-            // разделител над нашата група
-            if (!ul.querySelector('.iag-sep') && firstOurs) {
-                const sep = document.createElement('li');
-                sep.className = 'iag-sep';
-                ul.insertBefore(sep, firstOurs);
-            }
-            const li = document.createElement('li');
-            li.className = 'iag-info-row';
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = 'iag-info-toggle';
-            input.checked = infoEnabled;
-            input.addEventListener('change', () => {
-                infoEnabled = input.checked;
-                saveInfo();
-                if (!infoEnabled) {
-                    overlay.setPosition(undefined); // скрий отворения popup
-                    highlightSource?.clear(); // и очертанията
+            if (!ul.querySelector('#iag-info-toggle')) {
+                // първият ред със значка „NEW“, който НЕ е наш – това е първият ни овърлей
+                const firstOurs = [...ul.querySelectorAll('li')].find(
+                    (li) => li.querySelector('.iag-new') && !li.classList.contains('iag-info-row'),
+                );
+                // разделител над нашата група
+                if (!ul.querySelector('.iag-sep') && firstOurs) {
+                    const sep = document.createElement('li');
+                    sep.className = 'iag-sep';
+                    ul.insertBefore(sep, firstOurs);
                 }
-            });
-            const label = document.createElement('label');
-            label.htmlFor = 'iag-info-toggle';
-            label.innerHTML = 'Инфо при клик' + NEW_BADGE;
-            li.appendChild(input);
-            li.appendChild(label);
-            // най-горе в нашата група: под разделителя, над първия овърлей
-            if (firstOurs) ul.insertBefore(li, firstOurs);
-            else ul.appendChild(li);
+                const infoLi = makeCheckRow('iag-info-row', 'iag-info-toggle', 'Инфо при клик' + NEW_BADGE, infoEnabled, (on) => {
+                    infoEnabled = on;
+                    saveInfo();
+                    if (!infoEnabled) {
+                        overlay.setPosition(undefined); // скрий отворения popup
+                        highlightSource?.clear(); // и очертанията
+                    }
+                });
+                const layersLi = makeCheckRow('iag-layers-row', 'iag-layers-toggle', 'Всички базови слоеве' + NEW_BADGE, showAllLayers, (on) => {
+                    showAllLayers = on;
+                    saveShowAll();
+                    applyClutter(ul); // покажи/скрий излишните веднага
+                });
+                const anchor = firstOurs || null;
+                ul.insertBefore(infoLi, anchor);
+                ul.insertBefore(layersLi, anchor);
+            }
+            applyClutter(ul); // скрий излишните базови слоеве (всеки render)
         };
 
         // Обвиваме renderPanel на layer switcher-а, за да добавяме тикчето след всяко
