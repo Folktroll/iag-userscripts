@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/ЗТ слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.9.2
+// @version      2.9.3
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии) с тикчета в менюто, и popup при клик с инфо за точката – включително режим на дейности (какво може/не може) от регистъра на ЗТ. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @homepageURL  https://github.com/Folktroll/iag-userscripts
@@ -542,7 +542,7 @@
             element: el,
             autoPan: { animation: { duration: 200 } },
             positioning: 'bottom-center',
-            offset: [0, -9], // колкото е и „опашката“ надолу → върхът ѝ сяда в клика
+            offset: [0, -16], // малко по-нагоре – стрелката да е над точицата, не върху нея
             stopEvent: true,
         });
         map.addOverlay(overlay);
