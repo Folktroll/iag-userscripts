@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         kade.si – ИАГ/КАИС/ЗТ слоеве + инфо при клик
 // @namespace    https://maps.iag.bg/
-// @version      2.9.0
+// @version      2.9.2
 // @description  Добавя към kade.si прозрачни овърлеи (ловни райони и горска карта от ИАГ, кадастрални граници, защитени територии) с тикчета в менюто, и popup при клик с инфо за точката – включително режим на дейности (какво може/не може) от регистъра на ЗТ. Най-долу в менюто има тикче за вкл./изкл. на popup-а.
 // @match        https://kade.si/*
 // @homepageURL  https://github.com/Folktroll/iag-userscripts
@@ -542,7 +542,7 @@
             element: el,
             autoPan: { animation: { duration: 200 } },
             positioning: 'bottom-center',
-            offset: [0, -12],
+            offset: [0, -9], // колкото е и „опашката“ надолу → върхът ѝ сяда в клика
             stopEvent: true,
         });
         map.addOverlay(overlay);
@@ -636,7 +636,7 @@
 .iag-sep{list-style:none;border-top:2px solid #ccc;margin:6px 0 4px;padding:0;height:0}
 .iag-popup{position:absolute;min-width:250px;max-width:440px;width:max-content;background:#fff;color:#1a1a1a;
   border:1px solid #bbb;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);
-  padding:10px 12px 10px;font:13px/1.4 system-ui,Arial,sans-serif;bottom:12px;left:-50%}
+  padding:10px 12px 10px;font:13px/1.4 system-ui,Arial,sans-serif}
 .iag-popup::after{content:"";position:absolute;bottom:-9px;left:50%;margin-left:-8px;
   border:8px solid transparent;border-top-color:#fff;filter:drop-shadow(0 1px 0 #bbb)}
 .iag-popup__close{position:absolute;top:4px;right:8px;color:#888;text-decoration:none;font-size:16px}
@@ -719,13 +719,14 @@
         'bgtopo-210k',
         'gkme-200k',
         'seetopo',
-        // Hiking и Open Railway Map ги включваме по подразбиране, но и тях скриваме –
-        // чекбоксовете им са излишни (не ги пипаш).
+        // Hiking и Open Railway Map – скрити (чекбоксовете им са излишни). НЕ ги
+        // включваме (остават както е по подразбиране в kade.si = изключени); при нужда
+        // се показват с „Всички базови слоеве“ и се включват оттам.
         'hiking',
         'openrailwaymap',
     ];
-    // Слоеве, които включваме по подразбиране (веднъж при зареждане).
-    const ENABLE_LAYERS = ['hiking', 'openrailwaymap'];
+    // Слоеве, които включваме по подразбиране (веднъж при зареждане). Празно = никакви.
+    const ENABLE_LAYERS = [];
     const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s_-]+/g, '');
 
     // Чекбокс „Всички базови слоеве“ – показва/скрива излишните. По подразбиране скрити.
@@ -821,7 +822,18 @@
                 source: highlightSource,
                 zIndex: 50,
                 style: (feature) => {
-                    const c = HL_COLORS[feature.get('kind')] || '#333';
+                    const kind = feature.get('kind');
+                    if (kind === 'point') {
+                        // маркер на кликнатата точка
+                        return new ol.style.Style({
+                            image: new ol.style.Circle({
+                                radius: 5,
+                                fill: new ol.style.Fill({ color: '#e8521f' }),
+                                stroke: new ol.style.Stroke({ color: '#fff', width: 2 }),
+                            }),
+                        });
+                    }
+                    const c = HL_COLORS[kind] || '#333';
                     return new ol.style.Style({
                         stroke: new ol.style.Stroke({ color: c, width: 3 }),
                         fill: new ol.style.Fill({ color: c + '22' }),
@@ -897,6 +909,16 @@
             overlay.setPosition(evt.coordinate);
             body.innerHTML = '<div class="iag-popup__empty">Зареждане…</div>';
             highlightSource?.clear(); // махаме очертанието от предишния клик
+            // маркер на кликнатата точка – за да се вижда за коя точка е инфото
+            if (highlightSource) {
+                try {
+                    const pt = new ol.Feature({ geometry: new ol.geom.Point(evt.coordinate) });
+                    pt.set('kind', 'point');
+                    highlightSource.addFeature(pt);
+                } catch {
+                    /* ако липсва ol.geom.Point – пропускаме маркера */
+                }
+            }
             // надморска височина – тегли се паралелно, не блокира текста
             const elevP = fetchElevation(lat, lon).catch(() => null);
             try {
